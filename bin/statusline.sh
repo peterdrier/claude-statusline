@@ -46,13 +46,14 @@ color_for_pct() {
 build_bar() {
     local pct=$1
     local width=$2
+    local color_pct=${3:-$pct}
     [ "$pct" -lt 0 ] 2>/dev/null && pct=0
     [ "$pct" -gt 100 ] 2>/dev/null && pct=100
 
     local filled=$(( pct * width / 100 ))
     local empty=$(( width - filled ))
     local bar_color
-    bar_color=$(color_for_pct "$pct")
+    bar_color=$(color_for_pct "$color_pct")
 
     local filled_str="" empty_str=""
     for ((i=0; i<filled; i++)); do filled_str+="●"; done
@@ -296,8 +297,31 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
     seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
     seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
     seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
-    seven_day_pct_color=$(color_for_pct "$seven_day_pct")
+
+    # Pace-aware coloring: project end-of-window usage from current pace
+    seven_day_pace_pct="$seven_day_pct"
+    if [ "$seven_day_pct" -lt 20 ] 2>/dev/null; then
+        # Too early / too little usage for meaningful projection — force green
+        seven_day_pace_pct=0
+    elif [ -n "$seven_day_reset_iso" ] && [ "$seven_day_reset_iso" != "null" ]; then
+        reset_epoch=$(iso_to_epoch "$seven_day_reset_iso")
+        if [ -n "$reset_epoch" ]; then
+            now_epoch=$(date +%s)
+            window_start=$(( reset_epoch - 7 * 86400 ))
+            elapsed_hrs=$(( (now_epoch - window_start) / 3600 ))
+            total_hrs=168
+            if [ "$elapsed_hrs" -gt 0 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
+                time_pct=$(( elapsed_hrs * 100 / total_hrs ))
+                if [ "$time_pct" -gt 0 ]; then
+                    seven_day_pace_pct=$(( seven_day_pct * 100 / time_pct ))
+                    [ "$seven_day_pace_pct" -gt 200 ] && seven_day_pace_pct=200
+                fi
+            fi
+        fi
+    fi
+
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$seven_day_pace_pct")
+    seven_day_pct_color=$(color_for_pct "$seven_day_pace_pct")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
     rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"

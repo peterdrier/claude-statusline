@@ -43,17 +43,27 @@ color_for_pct() {
     fi
 }
 
+color_for_weekly_pace() {
+    local pct=$1
+    if [ "$pct" -ge 100 ]; then printf "$red"
+    elif [ "$pct" -ge 90 ]; then printf "$yellow"
+    elif [ "$pct" -ge 80 ]; then printf "$orange"
+    else printf "$green"
+    fi
+}
+
 build_bar() {
     local pct=$1
     local width=$2
     local color_pct=${3:-$pct}
+    local color_fn=${4:-color_for_pct}
     [ "$pct" -lt 0 ] 2>/dev/null && pct=0
     [ "$pct" -gt 100 ] 2>/dev/null && pct=100
 
     local filled=$(( pct * width / 100 ))
     local empty=$(( width - filled ))
     local bar_color
-    bar_color=$(color_for_pct "$color_pct")
+    bar_color=$($color_fn "$color_pct")
 
     local filled_str="" empty_str=""
     for ((i=0; i<filled; i++)); do filled_str+="●"; done
@@ -93,29 +103,26 @@ iso_to_epoch() {
 
 format_reset_time() {
     local iso_str="$1"
-    local style="$2"
     [ -z "$iso_str" ] || [ "$iso_str" = "null" ] && return
 
     local epoch
     epoch=$(iso_to_epoch "$iso_str")
     [ -z "$epoch" ] && return
 
-    local result=""
-    case "$style" in
-        time)
-            result=$(date -j -r "$epoch" +"%l:%M%p" 2>/dev/null | sed 's/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //; s/\.//g')
-            ;;
-        datetime)
-            result=$(date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g' | tr '[:upper:]' '[:lower:]')
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //; s/\.//g')
-            ;;
-        *)
-            result=$(date -j -r "$epoch" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-            [ -z "$result" ] && result=$(date -d "@$epoch" +"%b %-d" 2>/dev/null)
-            ;;
-    esac
-    printf "%s" "$result"
+    local now_epoch
+    now_epoch=$(date +%s)
+    local remaining=$(( epoch - now_epoch ))
+    if [ "$remaining" -lt 0 ]; then remaining=0; fi
+
+    if [ "$remaining" -ge 172800 ]; then
+        printf "%dd" $(( remaining / 86400 ))
+    elif [ "$remaining" -ge 7200 ]; then
+        printf "%dh" $(( remaining / 3600 ))
+    elif [ "$remaining" -ge 60 ]; then
+        printf "%dm" $(( remaining / 60 ))
+    else
+        printf "<1m"
+    fi
 }
 
 # ── Extract JSON data ───────────────────────────────────
@@ -187,11 +194,6 @@ fi
 line1="${blue}${model_name}${reset}"
 line1+="${sep}"
 line1+="✍️ ${pct_color}${pct_used}%${reset}"
-line1+="${sep}"
-line1+="${cyan}${dirname}${reset}"
-if [ -n "$git_branch" ]; then
-    line1+=" ${green}(${git_branch}${red}${git_dirty}${green})${reset}"
-fi
 if [ -n "$session_duration" ]; then
     line1+="${sep}"
     line1+="${dim}⏱ ${reset}${white}${session_duration}${reset}"
@@ -295,16 +297,16 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
 
     five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
     five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-    five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
+    five_hour_reset=$(format_reset_time "$five_hour_reset_iso")
     five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
     five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
 
-    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}"
+    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}${sep}${dim}f:${reset} ${cyan}${dirname}${reset}"
 
     seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
     seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-    seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
+    seven_day_reset=$(format_reset_time "$seven_day_reset_iso")
 
     # Pace-aware coloring: project end-of-window usage from current pace
     seven_day_pace_pct="$seven_day_pct"
@@ -328,11 +330,15 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
         fi
     fi
 
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$seven_day_pace_pct")
-    seven_day_pct_color=$(color_for_pct "$seven_day_pace_pct")
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$seven_day_pace_pct" color_for_weekly_pace)
+    seven_day_pct_color=$(color_for_weekly_pace "$seven_day_pace_pct")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
-    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}"
+    branch_info=""
+    if [ -n "$git_branch" ]; then
+        branch_info="${sep}${dim}b:${reset} ${green}${git_branch}${red}${git_dirty}${reset}"
+    fi
+    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}${branch_info}"
 
     extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
     if [ "$extra_enabled" = "true" ]; then
@@ -342,9 +348,17 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
         extra_bar=$(build_bar "$extra_pct" "$bar_width")
         extra_pct_color=$(color_for_pct "$extra_pct")
 
-        extra_reset=$(date -v+1m -v1d +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        if [ -z "$extra_reset" ]; then
-            extra_reset=$(date -d "$(date +%Y-%m-01) +1 month" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        extra_reset_epoch=$(date -v+1m -v1d +%s 2>/dev/null)
+        if [ -z "$extra_reset_epoch" ]; then
+            extra_reset_epoch=$(date -d "$(date +%Y-%m-01) +1 month" +%s 2>/dev/null)
+        fi
+        extra_remaining=$(( extra_reset_epoch - $(date +%s) ))
+        if [ "$extra_remaining" -ge 172800 ]; then
+            extra_reset="$(( extra_remaining / 86400 ))d"
+        elif [ "$extra_remaining" -ge 7200 ]; then
+            extra_reset="$(( extra_remaining / 3600 ))h"
+        else
+            extra_reset="$(( extra_remaining / 60 ))m"
         fi
 
         extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"

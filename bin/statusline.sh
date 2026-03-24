@@ -206,6 +206,16 @@ case "$effort" in
     *)      line1+="${dim}◑ ${effort}${reset}" ;;
 esac
 
+# 2x credits indicator (March 13-28 2026, off-peak = outside 8AM-2PM EDT weekdays)
+edt_date=$(TZ="America/New_York" date +%Y%m%d)
+if [ "$edt_date" -ge 20260313 ] && [ "$edt_date" -le 20260328 ]; then
+    edt_hour=$(TZ="America/New_York" date +%-H)
+    edt_dow=$(TZ="America/New_York" date +%u)   # 1=Mon … 7=Sun
+    if [ "$edt_dow" -ge 6 ] || [ "$edt_hour" -lt 8 ] || [ "$edt_hour" -ge 14 ]; then
+        line1+=" ${red}2x${reset}"
+    fi
+fi
+
 # ── OAuth token resolution ──────────────────────────────
 get_oauth_token() {
     local token=""

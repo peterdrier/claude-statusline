@@ -101,30 +101,6 @@ iso_to_epoch() {
     return 1
 }
 
-format_reset_time() {
-    local iso_str="$1"
-    [ -z "$iso_str" ] || [ "$iso_str" = "null" ] && return
-
-    local epoch
-    epoch=$(iso_to_epoch "$iso_str")
-    [ -z "$epoch" ] && return
-
-    local now_epoch
-    now_epoch=$(date +%s)
-    local remaining=$(( epoch - now_epoch ))
-    if [ "$remaining" -lt 0 ]; then remaining=0; fi
-
-    if [ "$remaining" -ge 172800 ]; then
-        printf "%dd" $(( remaining / 86400 ))
-    elif [ "$remaining" -ge 7200 ]; then
-        printf "%dh" $(( remaining / 3600 ))
-    elif [ "$remaining" -ge 60 ]; then
-        printf "%dm" $(( remaining / 60 ))
-    else
-        printf "<1m"
-    fi
-}
-
 # ── Extract JSON data ───────────────────────────────────
 model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 
@@ -216,126 +192,64 @@ if [ "$edt_date" -ge 20260313 ] && [ "$edt_date" -le 20260328 ]; then
     fi
 fi
 
-# ── OAuth token resolution ──────────────────────────────
-get_oauth_token() {
-    local token=""
+# ── Rate limit data from CC input ──────────────────────
+format_reset_epoch() {
+    local epoch=$1
+    [ -z "$epoch" ] || [ "$epoch" = "null" ] && return
 
-    if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-        echo "$CLAUDE_CODE_OAUTH_TOKEN"
-        return 0
+    local now_epoch
+    now_epoch=$(date +%s)
+    local remaining=$(( epoch - now_epoch ))
+    if [ "$remaining" -lt 0 ]; then remaining=0; fi
+
+    if [ "$remaining" -ge 172800 ]; then
+        printf "%dd" $(( remaining / 86400 ))
+    elif [ "$remaining" -ge 7200 ]; then
+        printf "%dh" $(( remaining / 3600 ))
+    elif [ "$remaining" -ge 60 ]; then
+        printf "%dm" $(( remaining / 60 ))
+    else
+        printf "<1m"
     fi
-
-    if command -v security >/dev/null 2>&1; then
-        local blob
-        blob=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null)
-        if [ -n "$blob" ]; then
-            token=$(echo "$blob" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
-            if [ -n "$token" ] && [ "$token" != "null" ]; then
-                echo "$token"
-                return 0
-            fi
-        fi
-    fi
-
-    local creds_file="${HOME}/.claude/.credentials.json"
-    if [ -f "$creds_file" ]; then
-        token=$(jq -r '.claudeAiOauth.accessToken // empty' "$creds_file" 2>/dev/null)
-        if [ -n "$token" ] && [ "$token" != "null" ]; then
-            echo "$token"
-            return 0
-        fi
-    fi
-
-    if command -v secret-tool >/dev/null 2>&1; then
-        local blob
-        blob=$(timeout 2 secret-tool lookup service "Claude Code-credentials" 2>/dev/null)
-        if [ -n "$blob" ]; then
-            token=$(echo "$blob" | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
-            if [ -n "$token" ] && [ "$token" != "null" ]; then
-                echo "$token"
-                return 0
-            fi
-        fi
-    fi
-
-    echo ""
 }
-
-# ── Fetch usage data (cached) ──────────────────────────
-cache_file="/tmp/claude/statusline-usage-cache.json"
-cache_max_age=60
-mkdir -p /tmp/claude
-
-needs_refresh=true
-usage_data=""
-
-if [ -f "$cache_file" ]; then
-    cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
-    now=$(date +%s)
-    cache_age=$(( now - cache_mtime ))
-    if [ "$cache_age" -lt "$cache_max_age" ]; then
-        needs_refresh=false
-        usage_data=$(cat "$cache_file" 2>/dev/null)
-    fi
-fi
-
-if $needs_refresh; then
-    token=$(get_oauth_token)
-    if [ -n "$token" ] && [ "$token" != "null" ]; then
-        response=$(curl -s --max-time 5 \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $token" \
-            -H "anthropic-beta: oauth-2025-04-20" \
-            -H "User-Agent: claude-code/2.1.34" \
-            "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-        if [ -n "$response" ] && echo "$response" | jq -e '.five_hour' >/dev/null 2>&1; then
-            usage_data="$response"
-            echo "$response" > "$cache_file"
-        fi
-    fi
-    if [ -z "$usage_data" ] && [ -f "$cache_file" ]; then
-        usage_data=$(cat "$cache_file" 2>/dev/null)
-    fi
-fi
 
 # ── Rate limit lines ────────────────────────────────────
 rate_lines=""
 
-if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
+five_hour_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' | awk '{printf "%.0f", $1}')
+seven_day_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' | awk '{printf "%.0f", $1}')
+
+if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
     bar_width=10
 
-    five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
-    five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-    five_hour_reset=$(format_reset_time "$five_hour_reset_iso")
+    five_hour_pct=${five_hour_pct:-0}
+    five_hour_reset_epoch=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+    five_hour_reset=$(format_reset_epoch "$five_hour_reset_epoch")
     five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
     five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
 
     rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}${sep}${dim}f:${reset} ${cyan}${dirname}${reset}"
 
-    seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
-    seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-    seven_day_reset=$(format_reset_time "$seven_day_reset_iso")
+    seven_day_pct=${seven_day_pct:-0}
+    seven_day_reset_epoch=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
+    seven_day_reset=$(format_reset_epoch "$seven_day_reset_epoch")
 
     # Pace-aware coloring: project end-of-window usage from current pace
     seven_day_pace_pct="$seven_day_pct"
     if [ "$seven_day_pct" -lt 20 ] 2>/dev/null; then
         # Too early / too little usage for meaningful projection — force green
         seven_day_pace_pct=0
-    elif [ -n "$seven_day_reset_iso" ] && [ "$seven_day_reset_iso" != "null" ]; then
-        reset_epoch=$(iso_to_epoch "$seven_day_reset_iso")
-        if [ -n "$reset_epoch" ]; then
-            now_epoch=$(date +%s)
-            window_start=$(( reset_epoch - 7 * 86400 ))
-            elapsed_hrs=$(( (now_epoch - window_start) / 3600 ))
-            total_hrs=168
-            if [ "$elapsed_hrs" -gt 0 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
-                time_pct=$(( elapsed_hrs * 100 / total_hrs ))
-                if [ "$time_pct" -gt 0 ]; then
-                    seven_day_pace_pct=$(( seven_day_pct * 100 / time_pct ))
-                    [ "$seven_day_pace_pct" -gt 200 ] && seven_day_pace_pct=200
-                fi
+    elif [ -n "$seven_day_reset_epoch" ] && [ "$seven_day_reset_epoch" != "null" ]; then
+        now_epoch=$(date +%s)
+        window_start=$(( seven_day_reset_epoch - 7 * 86400 ))
+        elapsed_hrs=$(( (now_epoch - window_start) / 3600 ))
+        total_hrs=168
+        if [ "$elapsed_hrs" -gt 0 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
+            time_pct=$(( elapsed_hrs * 100 / total_hrs ))
+            if [ "$time_pct" -gt 0 ]; then
+                seven_day_pace_pct=$(( seven_day_pct * 100 / time_pct ))
+                [ "$seven_day_pace_pct" -gt 200 ] && seven_day_pace_pct=200
             fi
         fi
     fi
@@ -349,31 +263,6 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
         branch_info="${sep}${dim}b:${reset} ${green}${git_branch}${red}${git_dirty}${reset}"
     fi
     rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}${branch_info}"
-
-    extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
-    if [ "$extra_enabled" = "true" ]; then
-        extra_pct=$(echo "$usage_data" | jq -r '.extra_usage.utilization // 0' | awk '{printf "%.0f", $1}')
-        extra_used=$(echo "$usage_data" | jq -r '.extra_usage.used_credits // 0' | awk '{printf "%.2f", $1/100}')
-        extra_limit=$(echo "$usage_data" | jq -r '.extra_usage.monthly_limit // 0' | awk '{printf "%.2f", $1/100}')
-        extra_bar=$(build_bar "$extra_pct" "$bar_width")
-        extra_pct_color=$(color_for_pct "$extra_pct")
-
-        extra_reset_epoch=$(date -v+1m -v1d +%s 2>/dev/null)
-        if [ -z "$extra_reset_epoch" ]; then
-            extra_reset_epoch=$(date -d "$(date +%Y-%m-01) +1 month" +%s 2>/dev/null)
-        fi
-        extra_remaining=$(( extra_reset_epoch - $(date +%s) ))
-        if [ "$extra_remaining" -ge 172800 ]; then
-            extra_reset="$(( extra_remaining / 86400 ))d"
-        elif [ "$extra_remaining" -ge 7200 ]; then
-            extra_reset="$(( extra_remaining / 3600 ))h"
-        else
-            extra_reset="$(( extra_remaining / 60 ))m"
-        fi
-
-        extra_col="${white}extra${reset}   ${extra_bar} ${extra_pct_color}\$${extra_used}${dim}/${reset}${white}\$${extra_limit}${reset} ${dim}⟳${reset} ${white}${extra_reset}${reset}"
-        rate_lines+="\n${extra_col}"
-    fi
 fi
 
 # ── Output ──────────────────────────────────────────────

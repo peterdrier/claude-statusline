@@ -20,7 +20,7 @@ magenta='\033[38;2;180;140;255m'
 dim='\033[2m'
 reset='\033[0m'
 
-sep=" ${dim}│${reset} "
+sep="  "
 
 # ── Helpers ─────────────────────────────────────────────
 format_tokens() {
@@ -37,8 +37,8 @@ format_tokens() {
 color_for_pct() {
     local pct=$1
     if [ "$pct" -ge 90 ]; then printf "$red"
-    elif [ "$pct" -ge 70 ]; then printf "$yellow"
-    elif [ "$pct" -ge 50 ]; then printf "$orange"
+    elif [ "$pct" -ge 70 ]; then printf "$orange"
+    elif [ "$pct" -ge 50 ]; then printf "$yellow"
     else printf "$green"
     fi
 }
@@ -46,8 +46,8 @@ color_for_pct() {
 color_for_weekly_pace() {
     local pct=$1
     if [ "$pct" -ge 100 ]; then printf "$red"
-    elif [ "$pct" -ge 90 ]; then printf "$yellow"
-    elif [ "$pct" -ge 80 ]; then printf "$orange"
+    elif [ "$pct" -ge 90 ]; then printf "$orange"
+    elif [ "$pct" -ge 80 ]; then printf "$yellow"
     else printf "$green"
     fi
 }
@@ -203,13 +203,13 @@ format_reset_epoch() {
     if [ "$remaining" -lt 0 ]; then remaining=0; fi
 
     if [ "$remaining" -ge 172800 ]; then
-        printf "%dd" $(( remaining / 86400 ))
+        printf "%3s" "$(( remaining / 86400 ))d"
     elif [ "$remaining" -ge 7200 ]; then
-        printf "%dh" $(( remaining / 3600 ))
+        printf "%3s" "$(( remaining / 3600 ))h"
     elif [ "$remaining" -ge 60 ]; then
-        printf "%dm" $(( remaining / 60 ))
+        printf "%3s" "$(( remaining / 60 ))m"
     else
-        printf "<1m"
+        printf "%3s" "<1m"
     fi
 }
 
@@ -229,7 +229,25 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
     five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
 
-    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}${sep}${dim}f:${reset} ${cyan}${dirname}${reset}"
+    # 5-hour pace projection (always shown, fixed 3-char width)
+    fh_pace_pct="$five_hour_pct"
+    if [ "$five_hour_pct" -ge 5 ] 2>/dev/null && [ -n "$five_hour_reset_epoch" ] && [ "$five_hour_reset_epoch" != "null" ]; then
+        now_epoch=$(date +%s)
+        fh_window_start=$(( five_hour_reset_epoch - 5 * 3600 ))
+        fh_elapsed_min=$(( (now_epoch - fh_window_start) / 60 ))
+        if [ "$fh_elapsed_min" -gt 0 ] && [ "$fh_elapsed_min" -le 300 ]; then
+            fh_time_pct=$(( fh_elapsed_min * 100 / 300 ))
+            if [ "$fh_time_pct" -gt 0 ]; then
+                fh_pace_pct=$(( five_hour_pct * 100 / fh_time_pct ))
+                [ "$fh_pace_pct" -gt 200 ] && fh_pace_pct=200
+            fi
+        fi
+    fi
+    fh_proj_color=$(color_for_weekly_pace "$fh_pace_pct")
+    fh_pace_fmt=$(printf "%3d" "$fh_pace_pct")
+    five_hour_projected=" ${dim}→${reset}${fh_proj_color}${fh_pace_fmt}%${reset}"
+
+    rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}${five_hour_projected} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}${sep}${dim}f:${reset} ${cyan}${dirname}${reset}"
 
     seven_day_pct=${seven_day_pct:-0}
     seven_day_reset_epoch=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
@@ -258,11 +276,19 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
     seven_day_pct_color=$(color_for_weekly_pace "$seven_day_pace_pct")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
+    # Weekly pace projection (always shown, fixed 3-char width)
+    if [ "$seven_day_pace_pct" -le 0 ] 2>/dev/null; then
+        seven_day_pace_pct="$seven_day_pct"
+    fi
+    sd_proj_color=$(color_for_weekly_pace "$seven_day_pace_pct")
+    sd_pace_fmt=$(printf "%3d" "$seven_day_pace_pct")
+    seven_day_projected=" ${dim}→${reset}${sd_proj_color}${sd_pace_fmt}%${reset}"
+
     branch_info=""
     if [ -n "$git_branch" ]; then
         branch_info="${sep}${dim}b:${reset} ${green}${git_branch}${red}${git_dirty}${reset}"
     fi
-    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}${branch_info}"
+    rate_lines+="\n${white}weekly${reset}  ${seven_day_bar} ${seven_day_pct_color}${seven_day_pct_fmt}%${reset}${seven_day_projected} ${dim}⟳${reset} ${white}${seven_day_reset}${reset}${branch_info}"
 fi
 
 # ── Output ──────────────────────────────────────────────

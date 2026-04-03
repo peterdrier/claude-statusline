@@ -6,6 +6,18 @@ This is a fork of [kamranahmedse/claude-statusline](https://github.com/kamranahm
 
 ![demo](./.github/demo.png)
 
+## Improvements over upstream
+
+- **Pace projections** — projects your current/5h usage rate to end-of-window, so you can see if you're burning too fast before you hit a limit
+- **Pace-aware coloring** — bar colors reflect projected usage, not just current percentage
+- **Peak hours indicator** — flags weekday 8AM-2PM EDT as `peak` so you know when limits are tighter
+- **Session timer** — shows how long the current Claude Code session has been running
+- **Rate limits from stdin** — reads rate limit data from the CC input JSON instead of making a separate API call
+- **Worktree support** — correctly shows branch and directory when running inside a git worktree
+- **Skip-permissions indicator** — shows ⚡ when running with `--dangerously-skip-permissions`
+- **Fixed-width formatting** — percentages and projections use fixed widths to prevent layout shifts
+- **No git index locking** — uses `--no-optional-locks` on git status to avoid contention with Claude's git operations
+
 ## Install
 
 The easiest way to install is to ask Claude Code to do it for you. Paste something like this into a conversation:

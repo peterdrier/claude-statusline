@@ -1,18 +1,24 @@
-# claude-statusline
+# claude-statusline (fork)
 
-Configure your Claude Code statusline to show limits, directory and git info
+A customized Claude Code statusline showing rate limits, usage pacing, git info, and more.
+
+This is a fork of [kamranahmedse/claude-statusline](https://github.com/kamranahmedse/claude-statusline) by [@kamranahmedse](https://github.com/kamranahmedse). Credit to him for the original project and idea. Our version has diverged with additional features (pace projections, peak hour indicators, session timers, etc.) and the two projects are maintained independently.
 
 ![demo](./.github/demo.png)
 
 ## Install
 
-Run the command below to set it up
+The easiest way to install is to ask Claude Code to do it for you. Paste something like this into a conversation:
 
-```bash
-npx @kamranahmedse/claude-statusline
+```
+Review the statusline script at https://github.com/peterdrier/claude-statusline/blob/main/bin/statusline.sh
+for security issues. If it looks safe, install it by:
+1. Copying bin/statusline.sh to ~/.claude/statusline.sh
+2. Making it executable (chmod +x)
+3. Setting your Claude Code config (settings.json) to use it as the statusline
 ```
 
-It backups your old status line if any and copies the status line script to `~/.claude/statusline.sh` and configures your Claude Code settings.
+It's always a good idea to have Claude security-review any script before letting it install something into your environment. Better safe than sorry.
 
 ## Requirements
 
@@ -26,13 +32,15 @@ On macOS:
 brew install jq
 ```
 
-## Uninstall
+On Debian/Ubuntu:
 
 ```bash
-npx @kamranahmedse/claude-statusline --uninstall
+sudo apt install jq
 ```
 
-If you had a previous statusline, it restores it from the backup. Otherwise it removes the script and cleans up your settings.
+## Uninstall
+
+Remove `~/.claude/statusline.sh` and clear the `statusline` entry from your Claude Code `settings.json`.
 
 ## License
 

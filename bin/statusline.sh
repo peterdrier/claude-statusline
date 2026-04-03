@@ -145,7 +145,7 @@ git_branch=""
 git_dirty=""
 if git -C "$git_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git_branch=$(git -C "$git_dir" symbolic-ref --short HEAD 2>/dev/null)
-    if [ -n "$(git -C "$git_dir" status --porcelain 2>/dev/null)" ]; then
+    if [ -n "$(git -C "$git_dir" --no-optional-locks status --porcelain 2>/dev/null)" ]; then
         git_dirty="*"
     fi
 fi
@@ -167,7 +167,13 @@ if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
     fi
 fi
 
-line1="${blue}${model_name}${reset}"
+skip_perms=""
+parent_cmd=$(ps -o args= -p "$PPID" 2>/dev/null)
+if [[ "$parent_cmd" == *"--dangerously-skip-permissions"* ]]; then
+    skip_perms="⚡  "
+fi
+
+line1="${skip_perms}${blue}${model_name}${reset}"
 line1+="${sep}"
 line1+="✍️ ${pct_color}${pct_used}%${reset}"
 if [ -n "$session_duration" ]; then

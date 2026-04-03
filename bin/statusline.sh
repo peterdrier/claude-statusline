@@ -8,6 +8,8 @@ if [ -z "$input" ]; then
     exit 0
 fi
 
+echo "$input" | jq . > ~/.claude/statusline-input.json 2>/dev/null
+
 # ── Colors ──────────────────────────────────────────────
 blue='\033[38;2;0;153;255m'
 orange='\033[38;2;255;176;85m'
@@ -151,19 +153,15 @@ if git -C "$git_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 session_duration=""
-session_start=$(echo "$input" | jq -r '.session.start_time // empty')
-if [ -n "$session_start" ] && [ "$session_start" != "null" ]; then
-    start_epoch=$(iso_to_epoch "$session_start")
-    if [ -n "$start_epoch" ]; then
-        now_epoch=$(date +%s)
-        elapsed=$(( now_epoch - start_epoch ))
-        if [ "$elapsed" -ge 3600 ]; then
-            session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
-        elif [ "$elapsed" -ge 60 ]; then
-            session_duration="$(( elapsed / 60 ))m"
-        else
-            session_duration="${elapsed}s"
-        fi
+total_duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // empty')
+if [ -n "$total_duration_ms" ] && [ "$total_duration_ms" != "null" ]; then
+    elapsed=$(( total_duration_ms / 1000 ))
+    if [ "$elapsed" -ge 3600 ]; then
+        session_duration="$(( elapsed / 3600 ))h$(( (elapsed % 3600) / 60 ))m"
+    elif [ "$elapsed" -ge 60 ]; then
+        session_duration="$(( elapsed / 60 ))m"
+    else
+        session_duration="${elapsed}s"
     fi
 fi
 
@@ -193,6 +191,12 @@ edt_hour=$(TZ="America/New_York" date +%-H)
 edt_dow=$(TZ="America/New_York" date +%u)   # 1=Mon … 7=Sun
 if [ "$edt_dow" -le 5 ] && [ "$edt_hour" -ge 8 ] && [ "$edt_hour" -lt 14 ]; then
     line1+=" ${red}peak${reset}"
+fi
+
+total_cost=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
+cost_int=${total_cost%.*}
+if [ "${cost_int:-0}" -gt 0 ] 2>/dev/null; then
+    line1+="${sep}${green}\$${cost_int}${reset}"
 fi
 
 # ── Rate limit data from CC input ──────────────────────

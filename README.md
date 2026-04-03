@@ -14,9 +14,7 @@ This is a fork of [kamranahmedse/claude-statusline](https://github.com/kamranahm
 - **Session timer** — shows how long the current Claude Code session has been running
 - **Rate limits from stdin** — reads rate limit data from the CC input JSON instead of making a separate API call
 - **Worktree support** — correctly shows branch and directory when running inside a git worktree
-- **Skip-permissions indicator** — shows ⚡ when running with `--dangerously-skip-permissions`
 - **Fixed-width formatting** — percentages and projections use fixed widths to prevent layout shifts
-- **No git index locking** — uses `--no-optional-locks` on git status to avoid contention with Claude's git operations
 
 ## Install
 

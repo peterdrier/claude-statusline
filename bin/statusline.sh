@@ -38,6 +38,15 @@ format_tokens() {
 
 color_for_pct() {
     local pct=$1
+    if [ "$pct" -ge 90 ]; then printf "$red"
+    elif [ "$pct" -ge 70 ]; then printf "$orange"
+    elif [ "$pct" -ge 50 ]; then printf "$yellow"
+    else printf "$green"
+    fi
+}
+
+color_for_context_pct() {
+    local pct=$1
     if [ "$pct" -ge 25 ]; then printf "$red"
     elif [ "$pct" -ge 20 ]; then printf "$orange"
     elif [ "$pct" -ge 15 ]; then printf "$yellow"
@@ -130,7 +139,7 @@ if [ -f "$settings_path" ]; then
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
-pct_color=$(color_for_pct "$pct_used")
+pct_color=$(color_for_context_pct "$pct_used")
 cwd=$(echo "$input" | jq -r '.cwd // ""')
 [ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
 

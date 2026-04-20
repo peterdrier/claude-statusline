@@ -10,6 +10,40 @@ fi
 
 echo "$input" | jq . > ~/.claude/statusline-input.json 2>/dev/null
 
+# ── Known payload schema (observed 2026-04-20, Claude Code v2.1.114) ────
+# Diff `jq -r 'paths(scalars) | join(".")' ~/.claude/statusline-input.json`
+# against this list to spot new/removed fields.
+#
+#   context_window.total_input_tokens
+#   context_window.total_output_tokens
+#   context_window.context_window_size
+#   context_window.current_usage.input_tokens
+#   context_window.current_usage.output_tokens
+#   context_window.current_usage.cache_creation_input_tokens
+#   context_window.current_usage.cache_read_input_tokens
+#   context_window.used_percentage          [USED]
+#   context_window.remaining_percentage
+#   cost.total_cost_usd                     [USED]
+#   cost.total_duration_ms                  [USED]
+#   cost.total_api_duration_ms
+#   cost.total_lines_added
+#   cost.total_lines_removed
+#   cwd                                     [USED — fallback]
+#   exceeds_200k_tokens
+#   model.id
+#   model.display_name                      [USED]
+#   output_style
+#   rate_limits.five_hour.used_percentage   [USED]
+#   rate_limits.five_hour.resets_at         [USED]
+#   rate_limits.seven_day.used_percentage   [USED]
+#   rate_limits.seven_day.resets_at         [USED]
+#   session_id
+#   transcript_path
+#   version
+#   workspace.current_dir                   [USED]
+#   workspace.project_dir
+#   workspace.added_dirs
+
 # ── Colors ──────────────────────────────────────────────
 blue='\033[38;2;0;153;255m'
 orange='\033[38;2;255;176;85m'
@@ -83,54 +117,10 @@ build_bar() {
     printf "${bar_color}${filled_str}${dim}${empty_str}${reset}"
 }
 
-iso_to_epoch() {
-    local iso_str="$1"
-
-    local epoch
-    epoch=$(date -d "${iso_str}" +%s 2>/dev/null)
-    if [ -n "$epoch" ]; then
-        echo "$epoch"
-        return 0
-    fi
-
-    local stripped="${iso_str%%.*}"
-    stripped="${stripped%%Z}"
-    stripped="${stripped%%+*}"
-    stripped="${stripped%%-[0-9][0-9]:[0-9][0-9]}"
-
-    if [[ "$iso_str" == *"Z"* ]] || [[ "$iso_str" == *"+00:00"* ]] || [[ "$iso_str" == *"-00:00"* ]]; then
-        epoch=$(env TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
-    else
-        epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
-    fi
-
-    if [ -n "$epoch" ]; then
-        echo "$epoch"
-        return 0
-    fi
-
-    return 1
-}
-
 # ── Extract JSON data ───────────────────────────────────
 model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 
-size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
-[ "$size" -eq 0 ] 2>/dev/null && size=200000
-
-input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
-cache_create=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0')
-cache_read=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0')
-current=$(( input_tokens + cache_create + cache_read ))
-
-used_tokens=$(format_tokens $current)
-total_tokens=$(format_tokens $size)
-
-if [ "$size" -gt 0 ]; then
-    pct_used=$(( current * 100 / size ))
-else
-    pct_used=0
-fi
+pct_used=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | awk '{printf "%.0f", $1}')
 
 effort="default"
 settings_path="$HOME/.claude/settings.json"
@@ -140,16 +130,9 @@ fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
 pct_color=$(color_for_context_pct "$pct_used")
-cwd=$(echo "$input" | jq -r '.cwd // ""')
-[ -z "$cwd" ] || [ "$cwd" = "null" ] && cwd=$(pwd)
-
-# Use worktree path/branch when running inside a git worktree session
-worktree_path=$(echo "$input" | jq -r '.worktree.path // empty')
-if [ -n "$worktree_path" ] && [ -d "$worktree_path" ]; then
-    git_dir="$worktree_path"
-else
-    git_dir="$cwd"
-fi
+cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
+[ -z "$cwd" ] && cwd=$(pwd)
+git_dir="$cwd"
 dirname=$(basename "$git_dir")
 
 git_branch=""

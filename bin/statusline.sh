@@ -228,22 +228,18 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
     five_hour_pct_color=$(color_for_pct "$five_hour_pct")
     five_hour_pct_fmt=$(printf "%3d" "$five_hour_pct")
 
-    # 5-hour pace projection (always shown, fixed 3-char width)
+    # 5-hour pace projection (always shown, one decimal, fixed 5-char width)
     fh_pace_pct="$five_hour_pct"
     if [ "$five_hour_pct" -ge 5 ] 2>/dev/null && [ -n "$five_hour_reset_epoch" ] && [ "$five_hour_reset_epoch" != "null" ]; then
         now_epoch=$(date +%s)
         fh_window_start=$(( five_hour_reset_epoch - 5 * 3600 ))
         fh_elapsed_min=$(( (now_epoch - fh_window_start) / 60 ))
-        if [ "$fh_elapsed_min" -gt 0 ] && [ "$fh_elapsed_min" -le 300 ]; then
-            fh_time_pct=$(( fh_elapsed_min * 100 / 300 ))
-            if [ "$fh_time_pct" -gt 0 ]; then
-                fh_pace_pct=$(( five_hour_pct * 100 / fh_time_pct ))
-                [ "$fh_pace_pct" -gt 200 ] && fh_pace_pct=200
-            fi
+        if [ "$fh_elapsed_min" -ge 3 ] && [ "$fh_elapsed_min" -le 300 ]; then
+            fh_pace_pct=$(awk -v u="$five_hour_pct" -v e="$fh_elapsed_min" 'BEGIN { p = u * 300 / e; if (p > 200) p = 200; printf "%.1f", p }')
         fi
     fi
-    fh_proj_color=$(color_for_weekly_pace "$fh_pace_pct")
-    fh_pace_fmt=$(printf "%3d" "$fh_pace_pct")
+    fh_proj_color=$(color_for_weekly_pace "${fh_pace_pct%.*}")
+    fh_pace_fmt=$(awk -v p="$fh_pace_pct" 'BEGIN { printf "%5.1f", p }')
     five_hour_projected=" ${dim}→${reset}${fh_proj_color}${fh_pace_fmt}%${reset}"
 
     rate_lines+="${white}current${reset} ${five_hour_bar} ${five_hour_pct_color}${five_hour_pct_fmt}%${reset}${five_hour_projected} ${dim}⟳${reset} ${white}${five_hour_reset}${reset}${sep}${dim}f:${reset} ${cyan}${dirname}${reset}"
@@ -262,25 +258,23 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
         window_start=$(( seven_day_reset_epoch - 7 * 86400 ))
         elapsed_hrs=$(( (now_epoch - window_start) / 3600 ))
         total_hrs=168
-        if [ "$elapsed_hrs" -gt 0 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
-            time_pct=$(( elapsed_hrs * 100 / total_hrs ))
-            if [ "$time_pct" -gt 0 ]; then
-                seven_day_pace_pct=$(( seven_day_pct * 100 / time_pct ))
-                [ "$seven_day_pace_pct" -gt 200 ] && seven_day_pace_pct=200
-            fi
+        if [ "$elapsed_hrs" -ge 2 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
+            seven_day_pace_pct=$(awk -v u="$seven_day_pct" -v e="$elapsed_hrs" -v t="$total_hrs" 'BEGIN { p = u * t / e; if (p > 200) p = 200; printf "%.1f", p }')
         fi
     fi
 
-    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$seven_day_pace_pct" color_for_weekly_pace)
-    seven_day_pct_color=$(color_for_weekly_pace "$seven_day_pace_pct")
+    sd_pace_color_key=${seven_day_pace_pct%.*}
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width" "$sd_pace_color_key" color_for_weekly_pace)
+    seven_day_pct_color=$(color_for_weekly_pace "$sd_pace_color_key")
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
-    # Weekly pace projection (always shown, fixed 3-char width)
-    if [ "$seven_day_pace_pct" -le 0 ] 2>/dev/null; then
+    # Weekly pace projection (always shown, one decimal, fixed 5-char width)
+    if [ "$sd_pace_color_key" -le 0 ] 2>/dev/null; then
         seven_day_pace_pct="$seven_day_pct"
+        sd_pace_color_key="$seven_day_pct"
     fi
-    sd_proj_color=$(color_for_weekly_pace "$seven_day_pace_pct")
-    sd_pace_fmt=$(printf "%3d" "$seven_day_pace_pct")
+    sd_proj_color=$(color_for_weekly_pace "$sd_pace_color_key")
+    sd_pace_fmt=$(awk -v p="$seven_day_pace_pct" 'BEGIN { printf "%5.1f", p }')
     seven_day_projected=" ${dim}→${reset}${sd_proj_color}${sd_pace_fmt}%${reset}"
 
     branch_info=""

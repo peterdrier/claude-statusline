@@ -10,7 +10,7 @@ fi
 
 echo "$input" | jq . > ~/.claude/statusline-input.json 2>/dev/null
 
-# ── Known payload schema (observed 2026-04-20, Claude Code v2.1.114) ────
+# ── Known payload schema (observed 2026-08-10) ──────────────────────────
 # Diff `jq -r 'paths(scalars) | join(".")' ~/.claude/statusline-input.json`
 # against this list to spot new/removed fields.
 #
@@ -29,20 +29,28 @@ echo "$input" | jq . > ~/.claude/statusline-input.json 2>/dev/null
 #   cost.total_lines_added
 #   cost.total_lines_removed
 #   cwd                                     [USED — fallback]
-#   exceeds_200k_tokens
+#   effort.level                            [USED — settings.json is fallback]
 #   model.id
 #   model.display_name                      [USED]
-#   output_style
+#   output_style.name                       (was a bare `output_style` string)
+#   prompt_id
 #   rate_limits.five_hour.used_percentage   [USED]
 #   rate_limits.five_hour.resets_at         [USED]
 #   rate_limits.seven_day.used_percentage   [USED]
 #   rate_limits.seven_day.resets_at         [USED]
 #   session_id
+#   session_name
+#   thinking.enabled
 #   transcript_path
 #   version
 #   workspace.current_dir                   [USED]
 #   workspace.project_dir
 #   workspace.added_dirs
+#   workspace.repo.host
+#   workspace.repo.owner
+#   workspace.repo.name
+#
+# Gone since 2026-04-20: exceeds_200k_tokens
 
 # ── Colors ──────────────────────────────────────────────
 blue='\033[38;2;0;153;255m'
@@ -122,10 +130,13 @@ model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 
 pct_used=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | awk '{printf "%.0f", $1}')
 
-effort="default"
-settings_path="$HOME/.claude/settings.json"
-if [ -f "$settings_path" ]; then
-    effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+effort=$(echo "$input" | jq -r '.effort.level // empty')
+if [ -z "$effort" ]; then
+    effort="default"
+    settings_path="$HOME/.claude/settings.json"
+    if [ -f "$settings_path" ]; then
+        effort=$(jq -r '.effortLevel // "default"' "$settings_path" 2>/dev/null)
+    fi
 fi
 
 # ── LINE 1: Model │ Context % │ Directory (branch) │ Session │ Thinking ──
@@ -235,7 +246,7 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
         fh_window_start=$(( five_hour_reset_epoch - 5 * 3600 ))
         fh_elapsed_min=$(( (now_epoch - fh_window_start) / 60 ))
         if [ "$fh_elapsed_min" -ge 3 ] && [ "$fh_elapsed_min" -le 300 ]; then
-            fh_pace_pct=$(awk -v u="$five_hour_pct" -v e="$fh_elapsed_min" 'BEGIN { p = u * 300 / e; if (p > 200) p = 200; printf "%.1f", p }')
+            fh_pace_pct=$(awk -v u="$five_hour_pct" -v e="$fh_elapsed_min" 'BEGIN { p = u * 300 / e; if (p > 999) p = 999; printf "%.1f", p }')
         fi
     fi
     fh_pace_int=${fh_pace_pct%.*}
@@ -251,16 +262,13 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
 
     # Pace-aware coloring: project end-of-window usage from current pace
     seven_day_pace_pct="$seven_day_pct"
-    if [ "$seven_day_pct" -lt 20 ] 2>/dev/null; then
-        # Too early / too little usage for meaningful projection — force green
-        seven_day_pace_pct=0
-    elif [ -n "$seven_day_reset_epoch" ] && [ "$seven_day_reset_epoch" != "null" ]; then
+    if [ -n "$seven_day_reset_epoch" ] && [ "$seven_day_reset_epoch" != "null" ]; then
         now_epoch=$(date +%s)
         window_start=$(( seven_day_reset_epoch - 7 * 86400 ))
         elapsed_hrs=$(( (now_epoch - window_start) / 3600 ))
         total_hrs=168
         if [ "$elapsed_hrs" -ge 2 ] && [ "$elapsed_hrs" -le "$total_hrs" ]; then
-            seven_day_pace_pct=$(awk -v u="$seven_day_pct" -v e="$elapsed_hrs" -v t="$total_hrs" 'BEGIN { p = u * t / e; if (p > 200) p = 200; printf "%.1f", p }')
+            seven_day_pace_pct=$(awk -v u="$seven_day_pct" -v e="$elapsed_hrs" -v t="$total_hrs" 'BEGIN { p = u * t / e; if (p > 999) p = 999; printf "%.1f", p }')
         fi
     fi
 
@@ -270,9 +278,6 @@ if [ -n "$five_hour_pct" ] || [ -n "$seven_day_pct" ]; then
     seven_day_pct_fmt=$(printf "%3d" "$seven_day_pct")
 
     # Weekly pace projection (float internally, integer display, fixed 3-char width)
-    if [ "$sd_pace_int" -le 0 ] 2>/dev/null; then
-        sd_pace_int="$seven_day_pct"
-    fi
     sd_proj_color=$(color_for_weekly_pace "$sd_pace_int")
     sd_pace_fmt=$(printf "%3s" "$sd_pace_int")
     seven_day_projected=" ${dim}→${reset}${sd_proj_color}${sd_pace_fmt}%${reset}"
